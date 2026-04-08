@@ -1,15 +1,6 @@
-# Python virtual environment
 venv/
-
-# Cache Python
 __pycache__/
-
-# Folder log
 logs/
 test/
-
-# File konfigurasi sensitif (berisi password/database key)
 .env
-
-# File Excel hasil generate atau data mentah (opsional)
 *.xlsx
