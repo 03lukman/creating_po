@@ -1,128 +1,79 @@
-import openpyxl
+import xlwings as xw
 import os
 import re
 from datetime import datetime
-from openpyxl.drawing.image import Image
 
-# ===== HELPER: PO NUMBER =====
 def generate_po_number(base, increment):
     match = re.search(r'(\D+)(\d+)$', base)
-    if not match:
-        return base
-
+    if not match: return base
     prefix, number = match.groups()
     return f"{prefix}{int(number)+increment:03d}"
 
-
-def generate_po(
-    so,
-    items,
-    save_dir,
-    mode="DEBUG",
-    template_path=None,
-    base_po="POR-NN26C023",
-    index=0
-):
-    # ===== PILIH MODE TEMPLATE / NON TEMPLATE =====
-    if template_path and mode == "PROD":
-        wb = openpyxl.load_workbook(template_path)
-        sheet = wb.active
-
-    # ===== LOGO =====
-        logo_path = r"C:\Users\lukman\MAGANGHUB\po\gambar\logo_nashua.png"
-
-        if os.path.exists(logo_path):
-            img = Image(logo_path)
-            img.width = 250
-            img.height = 80
-            sheet.add_image(img, "A1")
-        else:
-            print(f"⚠ WARNING: Logo tidak ditemukan di {logo_path}")
-
-    else:
-        wb = openpyxl.Workbook()
-        sheet = wb.active
-        sheet.title = "PO"
-
-    # ===== VALIDASI SODATE =====
-    dates = set(item[0] for item in items if item[0])
-    if len(dates) > 1:
-        print(f"⚠ WARNING: SO {so} punya multiple SODATE: {dates}")
-
-    # ===== DATE =====
-    tanggal = items[0][0]
-    if hasattr(tanggal, "strftime"):
-        tanggal_str = tanggal.strftime("%d/%m/%Y")
-    else:
-        tanggal_str = str(tanggal)
-
-    # ===== MODE TEMPLATE =====
-    if template_path and mode == "PROD":
-
-        # PO NUMBER
-        po_number = generate_po_number(base_po, index)
-        sheet["E4"] = po_number
-
-        # DATE
-        sheet["E5"] = tanggal_str
-
-        start_row = 16
-
-        for i, item in enumerate(items):
-            r = start_row + i
-
-            sheet[f"A{r}"] = item[1]  # CONCAT
-            sheet[f"B{r}"] = item[3]
-            sheet[f"C{r}"] = item[4]
-            sheet[f"D{r}"] = item[5]
-
-            harga = item[-2]
-            total = item[-1]
-
-            if isinstance(harga, (int, float)):
-                sheet[f"E{r}"] = harga
-                sheet[f"E{r}"].number_format = '#,##0'
-            else:
-                sheet[f"E{r}"] = "NOT FOUND"
-
-            if isinstance(total, (int, float)):
-                sheet[f"F{r}"] = total
-                sheet[f"F{r}"].number_format = '#,##0'
-
-    # ===== MODE DEBUG (LAMA TETAP ADA) =====
-    else:
-        sheet["A1"] = "PURCHASE ORDER"
-        sheet["A3"] = "NO SO:"
-        sheet["B3"] = so
-
-        sheet["A4"] = "DATE:"
-        sheet["B4"] = tanggal_str
-
-        start_row = 6
-
-        sheet[f"A{start_row}"] = "KODE"
-        sheet[f"B{start_row}"] = "NAMA"
-        sheet[f"C{start_row}"] = "QTY"
-        sheet[f"D{start_row}"] = "HARGA"
-        sheet[f"E{start_row}"] = "TOTAL"
-
-        for i, item in enumerate(items):
-            r = start_row + 1 + i
-
-            sheet[f"A{r}"] = item[2]
-            sheet[f"B{r}"] = item[3]
-            sheet[f"C{r}"] = item[4]
-            sheet[f"C{r}"].number_format = '#,##0'
-
-            harga = item[-2]
-            total = item[-1]
-
-            sheet[f"D{r}"] = harga if harga else "NOT FOUND"
-            sheet[f"E{r}"] = total if total else ""
-
-    # ===== SAVE =====
+def generate_po(so, items, save_dir, mode="PROD", template_path=None, base_po="POR-NN26C023", index=0):
+    # 1. Tentukan Path
     filename = f"PO_{so}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-    path = os.path.join(save_dir, filename)
+    final_path = os.path.join(save_dir, filename)
+    logo_path = r"C:\Users\lukman\MAGANGHUB\po\gambar\logo_nashua.png"
 
-    wb.save(path)
-    return path
+    # Jalankan Excel di latar belakang
+    app = xw.App(visible=False)
+    
+    try:
+        # 2. Buka Template Langsung
+        if template_path and os.path.exists(template_path):
+            wb = app.books.open(template_path)
+        else:
+            print("❌ Template tidak ditemukan!")
+            return None
+            
+        sheet = wb.sheets[0]
+
+        # 3. ISI DATA KE SEL (Sama seperti cara openpyxl tapi versi xlwings)
+        if mode == "PROD":
+            # Isi Header PO
+            sheet.range("E4").value = generate_po_number(base_po, index)
+            sheet.range("E5").value = items[0][0].strftime("%d/%m/%Y") if hasattr(items[0][0], "strftime") else str(items[0][0])
+
+            # Isi Tabel Item (Mulai baris 16)
+            start_row = 16
+            for i, item in enumerate(items):
+                r = start_row + i
+                sheet.range(f"A{r}").value = item[1] # Kode
+                sheet.range(f"B{r}").value = item[3] # Description
+                sheet.range(f"C{r}").value = item[4] # Qty
+                sheet.range(f"D{r}").value = item[5] # Unit
+                sheet.range(f"E{r}").value = item[-2] # Price
+                sheet.range(f"F{r}").value = item[-1] # Amount
+                
+                # Format Angka (Ribuan pakai koma/titik)
+                sheet.range(f"E{r}:F{r}").number_format = '#,##0'
+
+        # 4. SETTING HEADER GAMBAR (FINISHING)
+        if os.path.exists(logo_path):
+            # Penting: Masukkan ke Left Header karena posisi Nashua di kiri
+            sheet.page_setup.left_header_picture = logo_path
+            sheet.page_setup.left_header = '&G' 
+            
+            # Atur Margin agar logo punya ruang dan tidak menabrak tabel
+            sheet.page_setup.top_margin = 100   # Jarak konten dari atas kertas
+            sheet.page_setup.header_margin = 20 # Jarak header dari atas kertas
+            
+            # Paksa agar pas di satu halaman A4
+            sheet.page_setup.zoom = False
+            sheet.page_setup.fit_to_pages_wide = 1
+            sheet.page_setup.fit_to_pages_tall = 1
+        else:
+            print(f"⚠ Logo tidak ditemukan di: {logo_path}")
+
+        # 5. SIMPAN SEBAGAI FILE BARU (Agar template asli tidak berubah)
+        wb.save(final_path)
+        wb.close()
+        
+    except Exception as e:
+        print(f"❌ Terjadi kesalahan: {e}")
+        return None
+    finally:
+        # Pastikan Excel tertutup sempurna
+        app.quit()
+
+    return final_path
