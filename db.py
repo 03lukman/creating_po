@@ -34,7 +34,8 @@ def fetch_data():
         b.ITEMNO,
         b.ITEMOVDESC,
         d.QUANTITY,
-        b.ITEMUNIT
+        b.ITEMUNIT,
+        b.ITEMOVDESC
     FROM ARINV a
     JOIN ARINVDET b ON a.ARINVOICEID = b.ARINVOICEID
     JOIN SO c ON b.SOID = c.SOID

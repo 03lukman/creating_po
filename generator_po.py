@@ -4,22 +4,21 @@ import re
 from datetime import datetime
 
 def generate_po_number(base, increment):
+    """Menghasilkan nomor PO otomatis berdasarkan base PO dan index."""
     match = re.search(r'(\D+)(\d+)$', base)
     if not match: return base
     prefix, number = match.groups()
-    return f"{prefix}{int(number)+increment:03d}"
+    # Menghitung nomor urut dan mempertahankan format 3 digit (misal: 023, 024)
+    new_number = int(number) + increment
+    return f"{prefix}{new_number:03d}"
 
 def generate_po(so, items, save_dir, mode="PROD", template_path=None, base_po="POR-NN26C023", index=0):
-    # 1. Persiapan Path
     filename = f"PO_{so}_{datetime.now().strftime('%Y%m%d')}.xlsx"
     final_path = os.path.join(save_dir, filename)
-    logo_path = r"C:\Users\lukman\MAGANGHUB\po\gambar\logo_nashua.png"
 
-    # Jalankan Excel secara invisible (latar belakang)
     app = xw.App(visible=False)
     
     try:
-        # 2. Buka Template
         if template_path and os.path.exists(template_path):
             wb = app.books.open(template_path)
         else:
@@ -28,75 +27,70 @@ def generate_po(so, items, save_dir, mode="PROD", template_path=None, base_po="P
             
         sheet = wb.sheets[0]
 
-        # 3. Pengisian Data
         if mode == "PROD":
-            # Isi Header PO (E4 & E5)
+            # --- 1. HEADER PO ---
+            # Nomor PO dan Tanggal
             sheet.range("E4").value = generate_po_number(base_po, index)
-            # Menggunakan tanggal dari database jika tersedia, jika tidak pakai hari ini
+            
+            # Mengambil tanggal dari item pertama (hasil fetch DB)
             tanggal_data = items[0][0] if items else datetime.now()
-            sheet.range("E5").value = tanggal_data.strftime("%d/%m/%Y") if hasattr(tanggal_data, "strftime") else str(tanggal_data)
+            if hasattr(tanggal_data, "strftime"):
+                sheet.range("E5").value = tanggal_data.strftime("%d/%m/%Y")
+            else:
+                sheet.range("E5").value = str(tanggal_data)
 
-            # Isi Tabel Item (Mulai Baris 16)
+            # --- 2. ISI TABEL ITEM ---
             start_row = 16
             for i, item in enumerate(items):
                 r = start_row + i
                 
-                # Definisikan cell utama
-                cell_kode = sheet.range(f"A{r}")
-                cell_desc = sheet.range(f"B{r}")
-                cell_qty  = sheet.range(f"C{r}")
-                cell_unit = sheet.range(f"D{r}")
-                cell_price = sheet.range(f"E{r}")
-                cell_amount = sheet.range(f"F{r}")
+                # Mapping data hasil processor.py
+                kode_item = item[2]
+                deskripsi = str(item[3]).strip()
+                qty       = item[4]
+                unit      = item[5]
+                # Index 6 adalah Ukuran murni hasil filter Excel
+                ukuran    = str(item[6]).strip() if len(item) > 6 and item[6] else ""
+                harga     = item[-2] # Harga DPP
+                total     = item[-1] # Subtotal per item
 
-                # Tulis Nilai
-                cell_kode.value = item[2]   # ITEMNO
-                cell_desc.value = item[3]   # ITEMOVDESC (Deskripsi Panjang)
-                cell_qty.value  = item[4]   # QUANTITY
-                cell_unit.value = item[5]   # ITEMUNIT
-                cell_price.value = item[-2] # HARGA
-                cell_amount.value = item[-1] # TOTAL
+                # Gabungkan Deskripsi dengan Ukuran (Newline)
+                if ukuran and ukuran.lower() != "none":
+                    full_text = f"{deskripsi}\nUkuran: {ukuran}"
+                else:
+                    full_text = deskripsi
 
-                # --- STRATEGI PROFESIONAL: PENANGANAN DESKRIPSI PANJANG ---
-                # Memastikan teks membungkus (wrap) dan baris melebar otomatis
-                cell_desc.api.WrapText = True 
+                # Menulis data ke kolom Excel
+                sheet.range(f"A{r}").value = kode_item
+                sheet.range(f"B{r}").value = full_text
+                sheet.range(f"C{r}").value = qty
+                sheet.range(f"D{r}").value = unit
+                sheet.range(f"E{r}").value = harga
+                sheet.range(f"F{r}").value = total
+
+                # --- 3. FORMATTING OTOMATIS ---
+                target_cell_desc = sheet.range(f"B{r}")
                 
-                # Mengatur perataan teks ke atas (Top) agar rapi jika deskripsi sangat panjang
+                # Mengaktifkan Word Wrap agar teks panjang turun ke bawah (tidak lari ke kolom Ukuran)
+                target_cell_desc.api.WrapText = True
+                
+                # Rata Atas agar kolom Kode/Qty sejajar dengan baris pertama Deskripsi
                 sheet.range(f"A{r}:F{r}").api.VerticalAlignment = xw.constants.VAlign.xlVAlignTop
                 
-                # Autofit hanya untuk baris yang sedang diisi
+                # Auto-adjust tinggi baris setelah teks digabung
                 sheet.range(f"{r}:{r}").rows.autofit()
 
-                # Format Angka Rupiah/Ribuan
-                cell_price.number_format = '#,##0'
-                cell_amount.number_format = '#,##0'
+                # Format angka ribuan tanpa desimal
+                sheet.range(f"E{r}:F{r}").number_format = '#,##0'
 
-        # 4. Finishing Logo (Header Sejati)
-        if os.path.exists(logo_path):
-            # Mengatur logo di sisi kiri (Left Header) sesuai identitas Nashua
-            sheet.page_setup.left_header_picture = logo_path
-            sheet.page_setup.left_header = '&G' 
-            
-            # Margin disesuaikan agar logo tidak menindih konten (Page Setup)
-            sheet.page_setup.top_margin = 100   
-            sheet.page_setup.header_margin = 20 
-            
-            # Optimasi cetak agar pas satu halaman lebar (A4)
-            sheet.page_setup.zoom = False
-            sheet.page_setup.fit_to_pages_wide = 1
-            sheet.page_setup.fit_to_pages_tall = False # Biarkan memanjang ke bawah jika item sangat banyak
-        else:
-            print(f"⚠ Peringatan: Logo tidak ditemukan di {logo_path}")
-
-        # 5. Simpan Hasil
+        # --- 4. PENYIMPANAN ---
         wb.save(final_path)
         wb.close()
         
     except Exception as e:
-        print(f"❌ Error saat generate PO: {str(e)}")
+        print(f"❌ Error Detail pada Generator: {str(e)}")
         return None
     finally:
-        # Pastikan aplikasi Excel benar-benar tertutup dari memori
         app.quit()
 
     return final_path
