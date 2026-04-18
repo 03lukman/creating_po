@@ -1,21 +1,32 @@
 import xlwings as xw
 import os
 import re
+import textwrap
 from datetime import datetime
 
 def generate_po_number(base, increment):
-    """Menghasilkan nomor PO otomatis berdasarkan base PO dan index."""
+    """Logika yang sudah work: Menghasilkan nomor PO otomatis."""
     match = re.search(r'(\D+)(\d+)$', base)
     if not match: return base
     prefix, number = match.groups()
-    # Menghitung nomor urut dan mempertahankan format 3 digit (misal: 023, 024)
     new_number = int(number) + increment
     return f"{prefix}{new_number:03d}"
+
+def wrap_kode(text, width=9):
+    """Logika khusus Kode: Potong paksa setiap 10 karakter (tanpa cari spasi)."""
+    if not text: return ""
+    text = str(text)
+    return "\n".join([text[i:i+width] for i in range(0, len(text), width)])
+
+def wrap_deskripsi(text, width=35):
+    """Logika khusus Deskripsi: Potong rapi per 35 karakter (mencari spasi)."""
+    if not text: return ""
+    lines = textwrap.wrap(str(text), width=width, break_long_words=True)
+    return "\n".join(lines)
 
 def generate_po(so, items, save_dir, mode="PROD", template_path=None, base_po="POR-NN26C023", index=0):
     filename = f"PO_{so}_{datetime.now().strftime('%Y%m%d')}.xlsx"
     final_path = os.path.join(save_dir, filename)
-
     app = xw.App(visible=False)
     
     try:
@@ -28,11 +39,9 @@ def generate_po(so, items, save_dir, mode="PROD", template_path=None, base_po="P
         sheet = wb.sheets[0]
 
         if mode == "PROD":
-            # --- 1. HEADER PO ---
-            # Nomor PO dan Tanggal
+            # --- 1. HEADER PO (LOGIKA WORK) ---
             sheet.range("E4").value = generate_po_number(base_po, index)
             
-            # Mengambil tanggal dari item pertama (hasil fetch DB)
             tanggal_data = items[0][0] if items else datetime.now()
             if hasattr(tanggal_data, "strftime"):
                 sheet.range("E5").value = tanggal_data.strftime("%d/%m/%Y")
@@ -44,21 +53,23 @@ def generate_po(so, items, save_dir, mode="PROD", template_path=None, base_po="P
             for i, item in enumerate(items):
                 r = start_row + i
                 
-                # Mapping data hasil processor.py
-                kode_item = item[2]
-                deskripsi = str(item[3]).strip()
-                qty       = item[4]
-                unit      = item[5]
-                # Index 6 adalah Ukuran murni hasil filter Excel
-                ukuran    = str(item[6]).strip() if len(item) > 6 and item[6] else ""
-                harga     = item[-2] # Harga DPP
-                total     = item[-1] # Subtotal per item
+                # Gunakan logika berbeda untuk Kode vs Deskripsi
+                kode_item = wrap_kode(item[2], width=9)
+                
+                deskripsi_raw = str(item[3]).strip()
+                deskripsi_wrapped = wrap_deskripsi(deskripsi_raw, width=35)
+                
+                qty    = item[4]
+                unit   = item[5]
+                ukuran = str(item[6]).strip() if len(item) > 6 and item[6] else ""
+                harga  = item[-2]
+                total  = item[-1]
 
-                # Gabungkan Deskripsi dengan Ukuran (Newline)
+                # Gabungkan deskripsi rapi dengan ukuran
                 if ukuran and ukuran.lower() != "none":
-                    full_text = f"{deskripsi}\nUkuran: {ukuran}"
+                    full_text = f"{deskripsi_wrapped}\nUkuran: {ukuran}"
                 else:
-                    full_text = deskripsi
+                    full_text = deskripsi_wrapped
 
                 # Menulis data ke kolom Excel
                 sheet.range(f"A{r}").value = kode_item
@@ -68,19 +79,15 @@ def generate_po(so, items, save_dir, mode="PROD", template_path=None, base_po="P
                 sheet.range(f"E{r}").value = harga
                 sheet.range(f"F{r}").value = total
 
-                # --- 3. FORMATTING OTOMATIS ---
-                target_cell_desc = sheet.range(f"B{r}")
+                # --- 3. FIXING LAYOUT & STABILITAS ---
+                # Kunci tinggi baris agar volume tetap (Fixed Height)
+                sheet.range(f"{r}:{r}").row_height = 40 
                 
-                # Mengaktifkan Word Wrap agar teks panjang turun ke bawah (tidak lari ke kolom Ukuran)
-                target_cell_desc.api.WrapText = True
+                target_range = sheet.range(f"A{r}:F{r}")
+                target_range.api.WrapText = True
+                target_range.api.VerticalAlignment = xw.constants.VAlign.xlVAlignTop
                 
-                # Rata Atas agar kolom Kode/Qty sejajar dengan baris pertama Deskripsi
-                sheet.range(f"A{r}:F{r}").api.VerticalAlignment = xw.constants.VAlign.xlVAlignTop
-                
-                # Auto-adjust tinggi baris setelah teks digabung
-                sheet.range(f"{r}:{r}").rows.autofit()
-
-                # Format angka ribuan tanpa desimal
+                # Format angka ribuan
                 sheet.range(f"E{r}:F{r}").number_format = '#,##0'
 
         # --- 4. PENYIMPANAN ---

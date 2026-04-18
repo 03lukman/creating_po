@@ -24,8 +24,8 @@ def fetch_data():
     cursor = conn.cursor()
 
     today = datetime.now().date()
-    start_date = today - timedelta(days=2)
-    end_date = today + timedelta(days=2)
+    start_date = today - timedelta(days=10)
+    end_date = today + timedelta(days=10)
 
     sql = f"""
     SELECT 
